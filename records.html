@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Saved Records – Sanjeevini Convent School</title>
+  <link rel="stylesheet" href="/static/css/style.css"/>
+</head>
+<body>
+
+<!-- ── NAVBAR ─────────────────────────────────────────── -->
+<nav class="app-navbar">
+  <div class="navbar-left">
+    <div class="navbar-emblem">🏫</div>
+    <div class="navbar-brand">
+      <span class="navbar-brand-name">Sanjeevini Convent School</span>
+      <span class="navbar-brand-sub">ADMISSION MANAGEMENT SYSTEM</span>
+    </div>
+  </div>
+  <div class="navbar-right">
+    <a class="nav-chip" href="/">📄 <span class="label">New Form</span></a>
+    <a class="nav-chip active" href="/records">📋 <span class="label">Records</span></a>
+    <div class="user-badge">
+      <div class="user-avatar" id="user-avatar">👤</div>
+      <span id="user-name">Loading…</span>
+    </div>
+    <button class="nav-chip danger" onclick="doLogout()">🚪 <span class="label">Sign Out</span></button>
+  </div>
+</nav>
+
+<div class="records-page">
+
+  <!-- Top bar -->
+  <div class="records-topbar">
+    <div>
+      <div class="records-page-title">📋 Admission Records</div>
+      <div class="records-page-sub">All saved student applications</div>
+    </div>
+    <div class="search-wrap">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="search-input" placeholder="Search by name or Student ID…" oninput="searchRecords()"/>
+    </div>
+    <a class="btn btn-success" href="/">➕ New Application</a>
+  </div>
+
+  <!-- Stats -->
+  <div class="stat-cards">
+    <div class="stat-card">
+      <div class="stat-icon navy">📁</div>
+      <div>
+        <div class="stat-num" id="stat-total">—</div>
+        <div class="stat-lbl">Total Records</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon gold">👦</div>
+      <div>
+        <div class="stat-num" id="stat-boys">—</div>
+        <div class="stat-lbl">Boys</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon green">👧</div>
+      <div>
+        <div class="stat-num" id="stat-girls">—</div>
+        <div class="stat-lbl">Girls</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div class="records-table-wrap">
+    <div id="records-container">
+      <div class="loading-state">⏳ Loading records…</div>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast-stack" id="toast-stack"></div>
+
+<script>
+let allRecords = [];
+
+function showToast(msg, type = 'info', duration = 2200) {
+  const stack = document.getElementById('toast-stack');
+  const icons = { success: '✅', error: '❌', warning: '⚠️', info: 'ℹ️' };
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.innerHTML = `<span class="toast-icon">${icons[type]||'ℹ️'}</span><span class="toast-text">${msg}</span>`;
+  stack.appendChild(toast);
+  setTimeout(() => { toast.classList.add('removing'); setTimeout(() => toast.remove(), 300); }, duration);
+}
+
+async function loadUserInfo() {
+  try {
+    const resp = await fetch('/api/me');
+    if (!resp.ok) { window.location.href = '/login'; return; }
+    const data = await resp.json();
+    document.getElementById('user-name').textContent = data.name;
+    const av = document.getElementById('user-avatar');
+    if (av) av.textContent = data.name ? data.name[0].toUpperCase() : '👤';
+    // Store role for UI
+    window._userRole = data.role;
+  } catch {}
+}
+
+async function loadRecords(query = '') {
+  const url = query ? `/api/records?q=${encodeURIComponent(query)}` : '/api/records';
+  const resp = await fetch(url);
+  allRecords = await resp.json();
+  renderRecords(allRecords);
+}
+
+function searchRecords() {
+  const q = document.getElementById('search-input').value.trim();
+  loadRecords(q);
+}
+
+function renderRecords(records) {
+  const container = document.getElementById('records-container');
+
+  // Update stats
+  document.getElementById('stat-total').textContent = records.length;
+  document.getElementById('stat-boys').textContent = records.filter(r => r.sex === 'Boy').length;
+  document.getElementById('stat-girls').textContent = records.filter(r => r.sex === 'Girl').length;
+
+  if (records.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">📭</div>
+        <h3>No records found</h3>
+        <p>Try a different search or <a href="/" style="color:var(--navy);font-weight:600">create a new admission form</a>.</p>
+      </div>`;
+    return;
+  }
+
+  const isAdmin = window._userRole === 'admin';
+
+  container.innerHTML = `
+    <table class="rtable">
+      <thead>
+        <tr>
+          <th>Student ID</th>
+          <th>Name</th>
+          <th>Gender</th>
+          <th>Date of Birth</th>
+          <th>Class</th>
+          <th>Saved On</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${records.map(r => `
+          <tr>
+            <td><span class="sid-tag">${r.student_id}</span></td>
+            <td><strong>${r.name || '<em style="color:var(--text-muted)">No Name</em>'}</strong></td>
+            <td>
+              ${r.sex === 'Boy' ? '<span class="gender-tag boy">👦 Boy</span>' :
+                r.sex === 'Girl' ? '<span class="gender-tag girl">👧 Girl</span>' : '—'}
+            </td>
+            <td>${formatDOB(r.dob_day, r.dob_month, r.dob_year)}</td>
+            <td>${r.admission_class ? `<span class="class-tag">${r.admission_class}</span>` : '—'}</td>
+            <td style="color:var(--text-muted);font-size:12px">${r.created_at}</td>
+            <td class="tbl-actions">
+              <button class="btn btn-gold btn-sm" onclick="editRecord('${r.student_id}')">✏️ Edit</button>
+              <button class="btn btn-primary btn-sm" onclick="printRecord('${r.student_id}')">🖨️ Print</button>
+              ${isAdmin ? `<button class="btn btn-danger btn-sm" onclick="deleteRecord('${r.student_id}', this)">🗑️</button>` : ''}
+            </td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+function formatDOB(d, m, y) {
+  if (!d && !m && !y) return '—';
+  return [d, m, y].filter(Boolean).join(' / ');
+}
+
+function editRecord(sid) { window.location.href = `/?load=${sid}`; }
+function printRecord(sid) { window.open(`/print/${sid}`, '_blank'); }
+
+async function deleteRecord(sid, btn) {
+  if (!confirm(`Permanently delete record ${sid}? This cannot be undone.`)) return;
+  btn.disabled = true;
+  const resp = await fetch(`/api/record/${sid}`, { method: 'DELETE' });
+  const data = await resp.json();
+  if (data.success) {
+    showToast('Record deleted', 'success');
+    loadRecords(document.getElementById('search-input').value.trim());
+  } else {
+    showToast(data.error || 'Delete failed', 'error');
+    btn.disabled = false;
+  }
+}
+
+async function doLogout() {
+  try { await fetch('/api/logout', { method: 'POST' }); } catch {}
+  window.location.href = '/login';
+}
+
+loadUserInfo().then(() => loadRecords());
+</script>
+</body>
+</html>
